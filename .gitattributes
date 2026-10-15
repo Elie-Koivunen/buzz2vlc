@@ -1,0 +1,3 @@
+# Launch_buzz2vlc.bat must keep its CRLF line endings (cmd.exe breaks on LF-only
+# batch files), so .bat files are stored and checked out byte for byte.
+*.bat -text

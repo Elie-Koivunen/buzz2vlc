@@ -1,0 +1,58 @@
+# buzz2vlc: compiles both Python files and runs the built-in self-test
+# (python buzz2vlc.py --selftest, no Buzz controller or VLC needed) on real
+# Windows, Linux and macOS machines. Also checks that the double-click launcher
+# still has the CRLF line endings cmd.exe needs.
+name: selftest
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  selftest:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        python: ["3.10", "3.13"]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5         # Node 24
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Python packages
+        # hidapi is only needed with a real receiver; the self-test runs without it
+        run: python -m pip install requests
+      - name: Compile
+        run: python -m py_compile buzz2vlc.py buzz2vlc_gui.py
+      - name: Self-test
+        run: |
+          set +e
+          python buzz2vlc.py --selftest 2>&1 | tee "$RUNNER_TEMP/selftest.log"
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            # show the failure on the run's summary page (job logs need a GitHub sign-in to read)
+            msg=$(tail -n 40 "$RUNNER_TEMP/selftest.log" | tr -d '\r' | awk '{gsub(/%/,"%25"); printf "%s%%0A", $0}')
+            echo "::error title=buzz2vlc selftest failed (${{ matrix.os }}, Python ${{ matrix.python }})::$msg"
+            { echo '### buzz2vlc selftest failed'; echo '```'; tail -n 80 "$RUNNER_TEMP/selftest.log"; echo '```'; } \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$rc"
+      - name: Launcher has CRLF line endings
+        run: |
+          python - <<'EOF'
+          import sys
+          data = open("Launch_buzz2vlc.bat", "rb").read()
+          lines, crlf = data.count(b"\n"), data.count(b"\r\n")
+          print(f"Launch_buzz2vlc.bat: {crlf} of {lines} line endings are CRLF")
+          if not lines or crlf != lines:
+              print("::error title=Launch_buzz2vlc.bat lost its CRLF line endings::cmd.exe breaks on LF-only batch files")
+              sys.exit(1)
+          EOF

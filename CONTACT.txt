@@ -1,0 +1,4 @@
+GitHub: https://github.com/Elie-Koivunen/buzz2vlc
+Email: Elie.Koivunen@Gmail.com
+License: PolyForm Noncommercial 1.0.0 (see LICENSE)
+Copyright (c) 2026 Elie Koivunen
