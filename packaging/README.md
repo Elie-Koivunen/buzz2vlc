@@ -25,9 +25,10 @@ VLC is a prerequisite that the installers check for and offer to install:
 
 - **Windows** ([`windows/buzz2vlc.iss`](windows/buzz2vlc.iss)): looks for VLC's registry key
   and Program Files folders. If it's missing, a wizard page offers to download
-  `vlc-<VLC_VERSION>-win64.exe` from download.videolan.org (only the pinned SHA-256 is
-  accepted) and runs it; VLC's own installer asks for administrator rights. Silent installs do
-  this with `/INSTALLVLC=1`. buzz2vlc itself installs per user by default
+  VLC's MSI package `vlc-<VLC_VERSION>-win64.msi` from download.videolan.org (only the
+  pinned SHA-256 is accepted) and installs it with msiexec: VLC's install wizard, with
+  Windows asking for administrator rights. Silent installs do this with `/INSTALLVLC=1`
+  (`msiexec /qn`). msiexec's log goes to `%TEMP%\buzz2vlc-vlc-install.log`. buzz2vlc itself installs per user by default
   (`PrivilegesRequired=lowest`); "all users" is offered. The AppId stays the same across
   versions, so a new version replaces the old one in place.
 - **Linux** ([`linux/setup.sh`](linux/setup.sh)): checks `vlc`, `wmctrl` and the udev rule
@@ -41,7 +42,7 @@ VLC is a prerequisite that the installers check for and offer to install:
 The VLC version and its SHA-256 are set in `release.yml` (`VLC_VERSION`, `VLC_SHA256`);
 `build.py` checks them against videolan.org's published checksum before it builds the
 installer. To offer a newer VLC, update both values from
-`https://download.videolan.org/pub/videolan/vlc/<version>/win64/vlc-<version>-win64.exe.sha256`.
+`https://download.videolan.org/pub/videolan/vlc/<version>/win64/vlc-<version>-win64.msi.sha256`.
 
 ## Building locally
 

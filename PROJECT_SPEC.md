@@ -105,12 +105,15 @@ portable tar.gz. The design decisions:
   needs no temp-folder unpacking. hidapi's own libraries come along.
 - **VLC is a prerequisite, not bundled.** buzz2vlc starts VLC as separate
   processes and uses whatever VLC the user has, so the installers check
-  for it and offer to install it: Windows downloads the official VLC
-  installer from download.videolan.org, accepting only a pinned SHA-256
+  for it and offer to install it: Windows downloads VLC's official 64-bit
+  MSI package from download.videolan.org, accepting only a pinned SHA-256
   (`VLC_VERSION` / `VLC_SHA256` in `release.yml`, checked against the
-  published checksum at build time), and starts it with ShellExec so
-  VLC's installer can ask for administrator rights. Linux installs the
-  distribution's package (apt, dnf, zypper, pacman).
+  published checksum at build time), and installs it with msiexec through
+  ShellExec, which can ask for administrator rights (silent: `/qn` with
+  "runas"). Not VLC's .exe installer: started silently on a clean Windows
+  machine it never finished (CI, 2026-10-16), while msiexec /qn is made
+  for unattended installs. Linux installs the distribution's package
+  (apt, dnf, zypper, pacman).
 - **Per-user installs by default.** Windows: `PrivilegesRequired=lowest`
   with "all users" offered; a fixed AppId makes a new version replace the
   old in place, and `[InstallDelete]` clears the old `_internal`. Linux:

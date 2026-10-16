@@ -168,14 +168,14 @@ def trial_install(setup: Path, work: Path) -> None:
 
 
 def check_vlc_download(version: str, sha256: str) -> None:
-    """The VLC installer the Windows setup offers must exist on videolan.org with
+    """The VLC package (MSI) the Windows setup offers must exist on videolan.org with
     exactly the pinned SHA-256 (the setup refuses any other file)."""
-    url = f"https://download.videolan.org/pub/videolan/vlc/{version}/win64/vlc-{version}-win64.exe.sha256"
+    url = f"https://download.videolan.org/pub/videolan/vlc/{version}/win64/vlc-{version}-win64.msi.sha256"
     with urllib.request.urlopen(url, timeout=60) as response:
         published = response.read().decode().split()[0].lower()
     if published != sha256.lower():
         raise SystemExit(f"VLC {version}: videolan.org publishes SHA-256 {published}, not {sha256}")
-    log(f"VLC {version} installer on videolan.org matches the pinned SHA-256")
+    log(f"VLC {version} MSI package on videolan.org matches the pinned SHA-256")
 
 
 def windows_setup(app_dir: Path, out: Path, ico: Path, iscc: Path, vlc_version: str, vlc_sha256: str) -> Path:
@@ -206,7 +206,7 @@ def main() -> int:
     parser.add_argument("--work", type=Path, help="scratch folder (default: a new temporary folder)")
     parser.add_argument("--iscc", type=Path, help="Windows: Inno Setup 6's ISCC.exe, to build the installer too")
     parser.add_argument("--vlc-version", help="Windows installer: the VLC version it offers to download")
-    parser.add_argument("--vlc-sha256", help="Windows installer: SHA-256 of that VLC installer")
+    parser.add_argument("--vlc-sha256", help="Windows installer: SHA-256 of that VLC's win64 MSI package")
     args = parser.parse_args()
     if not args.out.is_absolute() or (args.work and not args.work.is_absolute()):
         parser.error("--out and --work must be absolute paths")

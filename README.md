@@ -58,9 +58,9 @@ controls. `SHA256SUMS.txt` in each release holds the files' checksums.
 
 **Windows installer.** Installs for your user, no administrator rights needed ("Install for all
 users" is offered too), with a Start menu entry, an optional desktop icon and an uninstaller
-(Settings -> Apps). If VLC media player is missing, it offers to download the official 64-bit
-VLC installer from videolan.org, accepts the file only if its SHA-256 checksum is the expected
-one, and starts it. The installer isn't code-signed, so Windows SmartScreen may ask first: *More
+(Settings -> Apps). If VLC media player is missing, it offers to download VLC's official 64-bit
+installer package (MSI) from videolan.org, accepts the file only if its SHA-256 checksum is the
+expected one, and installs it (Windows asks for administrator rights for that). The installer isn't code-signed, so Windows SmartScreen may ask first: *More
 info* -> *Run anyway*. Unattended: `buzz2vlc-<version>-windows-x64-setup.exe /VERYSILENT
 /INSTALLVLC=1` (the last switch also installs VLC when it's missing).
 

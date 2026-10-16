@@ -21,14 +21,16 @@ permissions:
 
 env:
   PYTHON_VERSION: "3.12"
-  # The VLC the Windows installer offers to download; it accepts only this SHA-256.
+  # The VLC the Windows installer offers to download (its win64 MSI package); it accepts
+  # only this SHA-256 (videolan.org: vlc-<version>-win64.msi.sha256).
   VLC_VERSION: "3.0.24"
-  VLC_SHA256: "d711e1e1fe52052748c39080c7dce63f6b7e4c315efedf1774a3f1957b782ff3"
+  VLC_SHA256: "22172095ce4c2d5f5b600bb4c142d78105db29a77fa59a931941876f3b20f6d0"
 
 jobs:
   windows:
     name: Windows packages
     runs-on: windows-latest
+    timeout-minutes: 40
     defaults:
       run:
         shell: bash
@@ -78,23 +80,39 @@ jobs:
           $setup = (Get-ChildItem "$env:OUT/*-setup.exe").FullName
           $dir = "$env:RUNNER_TEMP\installed"
           $log = "$env:RUNNER_TEMP\setup.log"
-          $p = Start-Process -Wait -PassThru $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', "/DIR=$dir", "/LOG=$log", '/INSTALLVLC=1'
-          Select-String -Path $log -Pattern 'VLC'
-          if ($p.ExitCode -ne 0) { Write-Output "::error title=Installer::exit code $($p.ExitCode)"; exit 1 }
+          $msilog = "$env:TEMP\buzz2vlc-vlc-install.log"
+          function Fail([string]$title, [string]$message) {
+            Write-Output "::error title=$title::$message"
+            Write-Output "--- windows open now"
+            Get-Process | Where-Object { $_.MainWindowTitle } | Format-Table Id, ProcessName, MainWindowTitle -AutoSize | Out-String -Width 200
+            Write-Output "--- setup log (end)"
+            if (Test-Path $log) { Get-Content $log -Tail 60 }
+            Write-Output "--- msiexec log (end)"
+            if (Test-Path $msilog) { Get-Content $msilog -Tail 40 }
+            exit 1
+          }
+          # Setup.exe waits for its own installer process and returns its exit code; the time
+          # limit turns a hang (e.g. a dialog nobody can see) into a failure with diagnostics.
+          $p = Start-Process -PassThru $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', "/DIR=$dir", "/LOG=$log", '/INSTALLVLC=1'
+          if (-not $p.WaitForExit(900000)) { Fail 'Installer' 'still running after 15 minutes' }
+          Select-String -Path $log -Pattern 'VLC|msiexec'
+          if ($p.ExitCode -ne 0) { Fail 'Installer' "exit code $($p.ExitCode)" }
           $report = & "$dir\buzz2vlc-cli.exe" --version
           $report
-          if (-not ($report -match '^VLC: .*vlc\.exe$')) { Write-Output "::error title=Installer::VLC was not installed"; exit 1 }
+          if (-not ($report -match '^VLC: .*vlc\.exe$')) { Fail 'Installer' 'VLC was not installed' }
           $shortcut = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\buzz2vlc.lnk"
-          if (-not (Test-Path $shortcut)) { Write-Output "::error title=Installer::no Start menu shortcut"; exit 1 }
+          if (-not (Test-Path $shortcut)) { Fail 'Installer' 'no Start menu shortcut' }
           $g = Start-Process -PassThru "$dir\buzz2vlc.exe"
           Start-Sleep -Seconds 10
-          if ($g.HasExited) { Write-Output "::error title=Installed GUI::buzz2vlc.exe exited ($($g.ExitCode))"; exit 1 }
+          if ($g.HasExited) { Fail 'Installed GUI' "buzz2vlc.exe exited ($($g.ExitCode))" }
           Stop-Process -Id $g.Id
           Start-Sleep -Seconds 2
-          Start-Process -Wait "$dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
-          for ($i = 0; $i -lt 60 -and (Test-Path "$dir\buzz2vlc.exe"); $i++) { Start-Sleep -Seconds 1 }
-          if (Test-Path "$dir\buzz2vlc.exe") { Write-Output "::error title=Uninstaller::buzz2vlc.exe is still there"; exit 1 }
-          if (Test-Path $shortcut) { Write-Output "::error title=Uninstaller::the Start menu shortcut is still there"; exit 1 }
+          # unins000.exe hands over to a copy of itself in TEMP and exits; wait for the files to go
+          Start-Process "$dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
+          for ($i = 0; $i -lt 120 -and (Test-Path "$dir\buzz2vlc.exe"); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path "$dir\buzz2vlc.exe") { Fail 'Uninstaller' 'buzz2vlc.exe is still there after 2 minutes' }
+          for ($i = 0; $i -lt 30 -and (Test-Path $shortcut); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path $shortcut) { Fail 'Uninstaller' 'the Start menu shortcut is still there' }
           Write-Output "installed (with VLC), started, uninstalled"
       - uses: actions/upload-artifact@v5
         with:
@@ -107,6 +125,7 @@ jobs:
     name: Linux packages
     # The oldest supported runner: the packages then run on glibc 2.35 and newer.
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -170,6 +189,7 @@ jobs:
     name: Linux installer on ${{ matrix.image }}
     needs: linux
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -198,6 +218,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/buzz2vlc-v')
     needs: [windows, linux, linux-distros]
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:

@@ -6,8 +6,9 @@ The first numbered release, and the first with ready-to-run packages for Windows
 
 - **Installers.** `buzz2vlc-1.0.0-windows-x64-setup.exe` installs for your user without
   administrator rights, with a Start menu entry, an optional desktop icon and an uninstaller.
-  When VLC media player is missing it offers to download the official 64-bit VLC 3.0.24
-  installer from videolan.org (accepted only with the expected SHA-256 checksum) and starts it.
+  When VLC media player is missing it offers to download VLC 3.0.24's official 64-bit
+  installer package (MSI) from videolan.org, accepted only with the expected SHA-256 checksum,
+  and installs it.
   `buzz2vlc-1.0.0-linux-x86_64-setup.sh` checks for VLC, wmctrl and access to the Buzz receiver
   (a udev rule), offers to install what's missing with apt, dnf, zypper or pacman, and installs
   buzz2vlc with a menu entry and an uninstaller.

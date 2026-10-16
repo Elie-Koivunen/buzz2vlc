@@ -2,9 +2,11 @@
 ;   /DAppVersion=1.0.0  /DSourceDir=<the PyInstaller folder>  /DRepoDir=<the repository>
 ;   /DIconFile=<buzz2vlc.ico>  /DOutputDir=<folder>  /DVlcVersion=3.0.24  /DVlcSha256=<hex>
 ;
-; Checks for VLC media player. When it is missing, a wizard page offers to download the
-; official 64-bit VLC installer from videolan.org (accepted only with the expected SHA-256)
-; and start it. Installs for the current user by default (no administrator rights needed);
+; Checks for VLC media player. When it is missing, a wizard page offers to download VLC's
+; official 64-bit Windows Installer package (MSI) from videolan.org, accepted only with the
+; expected SHA-256, and install it with msiexec. (Not VLC's .exe installer: in a silent
+; install it never finished on a clean Windows machine; msiexec /qn is made for that.)
+; Installs for the current user by default (no administrator rights needed);
 ; "Install for all users" is offered on the first page.
 ;
 ; Command line, besides Inno Setup's own (/SILENT, /VERYSILENT, /DIR=, /CURRENTUSER,
@@ -30,12 +32,12 @@
   #error Pass /DVlcVersion=<VLC version offered for download>
 #endif
 #ifndef VlcSha256
-  #error Pass /DVlcSha256=<SHA-256 of that VLC installer>
+  #error Pass /DVlcSha256=<SHA-256 of that VLC MSI package>
 #endif
 
 #define AppName "buzz2vlc"
 #define AppUrl "https://github.com/Elie-Koivunen/buzz2vlc"
-#define VlcUrl "https://download.videolan.org/pub/videolan/vlc/" + VlcVersion + "/win64/vlc-" + VlcVersion + "-win64.exe"
+#define VlcUrl "https://download.videolan.org/pub/videolan/vlc/" + VlcVersion + "/win64/vlc-" + VlcVersion + "-win64.msi"
 
 [Setup]
 AppId={{37AF4F58-BC38-4727-932F-7E2541569035}
@@ -115,22 +117,30 @@ begin
   Result := True;
 end;
 
-{ Starts the downloaded VLC installer and waits for it. ShellExec, not Exec: VLC's
-  installer needs administrator rights, and only ShellExec shows the UAC prompt. }
+{ Installs the downloaded VLC package with msiexec and waits for it; msiexec writes its
+  own log to %TEMP%\buzz2vlc-vlc-install.log. Interactive: VLC's own install wizard, which
+  asks for administrator rights when it starts installing. Silent: no UI (/qn), so msiexec
+  itself is started with administrator rights ("runas": a UAC prompt unless Setup already
+  has them). ShellExec, not Exec: only ShellExec can elevate. }
 procedure RunVlcSetup(Silent: Boolean);
 var
-  Params: String;
+  Verb, Params: String;
   ResultCode: Integer;
 begin
+  Params := '/i "' + ExpandConstant('{tmp}\vlc-setup.msi') + '" /norestart /l*v "' +
+    ExpandConstant('{%TEMP}\buzz2vlc-vlc-install.log') + '"';
   if Silent then
-    Params := '/L=1033 /S'
+  begin
+    Verb := 'runas';
+    Params := Params + ' /qn';
+  end
   else
-    Params := '';
-  Log('Starting the VLC installer ' + Params);
-  if ShellExec('', ExpandConstant('{tmp}\vlc-setup.exe'), Params, '', SW_SHOW, ewWaitUntilTerminated, ResultCode) then
-    Log('The VLC installer finished with exit code ' + IntToStr(ResultCode))
+    Verb := '';
+  Log('Starting msiexec ' + Params);
+  if ShellExec(Verb, ExpandConstant('{sys}\msiexec.exe'), Params, '', SW_SHOW, ewWaitUntilTerminated, ResultCode) then
+    Log('msiexec finished with exit code ' + IntToStr(ResultCode) + ' (0 = installed, 3010 = installed, restart needed, 1602 = cancelled)')
   else
-    Log('The VLC installer could not be started: ' + SysErrorMessage(ResultCode));
+    Log('msiexec could not be started: ' + SysErrorMessage(ResultCode));
 end;
 
 procedure InitializeWizard;
@@ -139,8 +149,9 @@ begin
     'VLC media player',
     'buzz2vlc plays your playlists in VLC media player.',
     'VLC media player was not found on this computer, and buzz2vlc needs it.' + #13#10#13#10 +
-    'Setup can download the official VLC {#VlcVersion} installer (64-bit, about 40 MB) from ' +
-    'videolan.org, check that it is genuine, and start it for you.',
+    'Setup can download the official VLC {#VlcVersion} package (64-bit, about 63 MB) from ' +
+    'videolan.org, check that it is genuine, and install it for you. Installing VLC needs ' +
+    'administrator rights; Windows will ask.',
     True, False);
   VlcPage.Add('Download and install VLC {#VlcVersion} now (recommended)');
   VlcPage.Add('Skip: I will install VLC myself');
@@ -159,13 +170,13 @@ begin
   if (CurPageID = wpReady) and (VlcExe() = '') and (VlcPage.SelectedValueIndex = 0) then
   begin
     DownloadPage.Clear;
-    DownloadPage.Add('{#VlcUrl}', 'vlc-setup.exe', '{#VlcSha256}');
+    DownloadPage.Add('{#VlcUrl}', 'vlc-setup.msi', '{#VlcSha256}');
     DownloadPage.Show;
     try
       try
         DownloadPage.Download;
         DownloadPage.SetText('Installing VLC media player...',
-          'Follow the VLC installer. buzz2vlc setup continues when it closes.');
+          'Follow VLC''s installer. buzz2vlc setup continues when it closes.');
         RunVlcSetup(False);
       except
         if DownloadPage.AbortedByUser then
@@ -192,7 +203,7 @@ begin
     if ExpandConstant('{param:INSTALLVLC|0}') = '1' then
     begin
       try
-        DownloadTemporaryFile('{#VlcUrl}', 'vlc-setup.exe', '{#VlcSha256}', @OnDownloadProgress);
+        DownloadTemporaryFile('{#VlcUrl}', 'vlc-setup.msi', '{#VlcSha256}', @OnDownloadProgress);
         RunVlcSetup(True);
       except
         Log('VLC media player could not be downloaded: ' + GetExceptionMessage);
