@@ -1,0 +1,5 @@
+# Build tools and the program's own dependencies, pinned, for packaging/build.py.
+pyinstaller==6.22.3
+pillow==12.3.0
+hidapi==0.15.0
+requests==2.34.2

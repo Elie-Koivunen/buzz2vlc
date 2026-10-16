@@ -42,8 +42,13 @@ Lua.
   - `find_vlc_path`, `port_in_use`, `build_launch_command`,
     `launch_instance`, `close_instance`
   - CLI: `--list --debug --learn --check --selftest --diagnose
-    --diagnose-vlc --diagnose-sound`
-  - `cmd_selftest`: an in-file `unittest` suite (13 tests), runs with
+    --diagnose-vlc --diagnose-sound --version`
+  - `__version__` (major.minor.patch; release tags are
+    `buzz2vlc-v<version>`) and `version_report()` for `--version`: the
+    version plus hidapi/requests availability, the VLC `find_vlc_path`
+    would use, and window control. The installers run it to check a
+    fresh install.
+  - `cmd_selftest`: an in-file `unittest` suite (14 tests), runs with
     no hardware/VLC needed. Run it after every change and check its
     result.
 - **`buzz2vlc_gui.py`** — tkinter GUI, imports `buzz2vlc as core` for
@@ -69,12 +74,63 @@ Lua.
   line, since the move to its own repository (2026-10-12).
 - **`.gitattributes`** — `*.bat -text`: the launcher is stored byte for
   byte, so its CRLF endings survive every checkout and download.
-- **`.github/workflows/selftest.yml`** — CI: compiles both files and runs
-  `--selftest` on Windows, Linux and macOS for every push and pull request.
+- **`.github/workflows/selftest.yml`** — CI: compiles the program and the
+  packaging scripts, syntax-checks the shell scripts and runs `--selftest`
+  on Windows, Linux and macOS for every push and pull request.
+- **`CHANGELOG.md`** — one section per version; the release workflow
+  publishes that section as the release notes.
+- **`packaging/`** — the release packages (see Packaging and releases
+  below and `packaging/README.md`): `build.py`, `buzz2vlc.spec` +
+  `entry.py` (PyInstaller), `windows/buzz2vlc.iss` (Inno Setup),
+  `linux/setup.sh` (the self-extracting Linux installer),
+  `linux/distro-test.sh` (CI's container test), `requirements.txt`
+  (pinned build tools).
+- **`.github/workflows/release.yml`** — builds, tests and publishes the
+  packages for each `buzz2vlc-v<version>` tag.
 
 No `buzz2vlc_press.py` / `buzz2vlc_window.py` / `buzz2vlc_diagnose.py` —
 those were separate files in an earlier version and were folded into
-`buzz2vlc.py` to keep the number of files small. Keep it that way.
+`buzz2vlc.py` to keep the number of Python program files small (the
+packaging scripts live apart in `packaging/`). Keep it that way.
+
+## Packaging and releases
+
+Since 1.0.0 every release has the same four packages, so nobody needs
+Python: a Windows installer and portable zip, and a Linux installer and
+portable tar.gz. The design decisions:
+
+- **Frozen with PyInstaller, one folder (onedir), two executables**
+  sharing it (`entry.py` picks by name): `buzz2vlc` is the GUI (no console
+  on Windows), `buzz2vlc-cli` the command line. Onedir starts fast and
+  needs no temp-folder unpacking. hidapi's own libraries come along.
+- **VLC is a prerequisite, not bundled.** buzz2vlc starts VLC as separate
+  processes and uses whatever VLC the user has, so the installers check
+  for it and offer to install it: Windows downloads the official VLC
+  installer from download.videolan.org, accepting only a pinned SHA-256
+  (`VLC_VERSION` / `VLC_SHA256` in `release.yml`, checked against the
+  published checksum at build time), and starts it with ShellExec so
+  VLC's installer can ask for administrator rights. Linux installs the
+  distribution's package (apt, dnf, zypper, pacman).
+- **Per-user installs by default.** Windows: `PrivilegesRequired=lowest`
+  with "all users" offered; a fixed AppId makes a new version replace the
+  old in place, and `[InstallDelete]` clears the old `_internal`. Linux:
+  `~/.local/opt/buzz2vlc` + `~/.local/bin` (root: `/opt`, `/usr/local/bin`).
+- **Linux device access** is a udev rule with `TAG+="uaccess"` for both
+  the usb and hidraw nodes of 054c:0002/1000, because hidapi's backend
+  may open either. Without udev (containers) the check reads "n/a".
+- **The Linux installer only replaces or removes a folder that carries
+  its `.buzz2vlc-install` marker**, so a mistyped `--prefix` can never
+  wipe an unrelated folder.
+- **Every package is tested before it is published**: `build.py` runs
+  `--version` and `--selftest` on the built program and a trial
+  install/uninstall of the Linux installer; the workflow adds the GUI
+  opening (Windows, and Linux under Xvfb), a silent Windows install
+  including the VLC download, a full Linux install with prerequisites,
+  and the Linux installer in fresh Debian, Ubuntu, Fedora, openSUSE and
+  Arch containers. Built on ubuntu-22.04 so the Linux packages run on
+  glibc 2.35 and newer.
+- **The release routine** (version, archive the previous version in
+  vibe, check, commit, tag) is written down in `packaging/README.md`.
 
 ## Config schema (`~/.buzz2vlc.json`, override via `BUZZ2VLC_CONFIG`)
 

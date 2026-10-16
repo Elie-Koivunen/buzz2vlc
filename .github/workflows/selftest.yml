@@ -30,8 +30,11 @@ jobs:
       - name: Python packages
         # hidapi is only needed with a real receiver; the self-test runs without it
         run: python -m pip install requests
-      - name: Compile
-        run: python -m py_compile buzz2vlc.py buzz2vlc_gui.py
+      - name: Compile (program, packaging scripts, installer scripts)
+        run: |
+          python -m py_compile buzz2vlc.py buzz2vlc_gui.py packaging/build.py packaging/entry.py
+          bash -n packaging/linux/setup.sh
+          bash -n packaging/linux/distro-test.sh
       - name: Self-test
         run: |
           set +e

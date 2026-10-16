@@ -219,7 +219,7 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         _enable_windows_dpi_awareness()
-        self.title("buzz2vlc")
+        self.title(f"buzz2vlc {core.__version__}")
         self.geometry("820x560")
 
         self.cfg, errors, warnings = core.load_config()
@@ -309,7 +309,7 @@ class App(tk.Tk):
     def _show_about(self) -> None:
         contact = self._read_contact_info()
         text = (
-            "buzz2vlc\n\n"
+            f"buzz2vlc {core.__version__}\n\n"
             "Control multiple VLC instances with a PS2/PS3 Buzz controller.\n\n"
             "Reads the Buzz USB HID receiver directly and drives one or more "
             "VLC instances over VLC's built-in HTTP interface -- each buzzer "

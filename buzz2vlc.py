@@ -28,6 +28,7 @@ Usage:
     python buzz2vlc.py --selftest          # run built-in checks, no hardware needed
     python buzz2vlc.py --check             # validate/migrate the config file
     python buzz2vlc.py --diagnose          # settle button_byte/order/LEDs on real hardware
+    python buzz2vlc.py --version           # version, and which optional parts are available
     python buzz2vlc.py                     # run the listener daemon
 """
 from __future__ import annotations
@@ -57,9 +58,11 @@ try:
 except ImportError:  # pragma: no cover
     requests = None
 
+__version__ = "1.0.0"
+
 log = logging.getLogger("buzz2vlc")
 
-CONFIG_PATH = Path(os.environ.get("BUZZ2VLC_CONFIG", str(Path.home() / ".buzz2vlc.json")))
+CONFIG_PATH =Path(os.environ.get("BUZZ2VLC_CONFIG", str(Path.home() / ".buzz2vlc.json")))
 
 # Sony Buzz receiver, wired and wireless variants.
 BUZZ_VENDOR_ID = 0x054C
@@ -1908,6 +1911,10 @@ def cmd_selftest() -> int:
     import unittest
 
     class Tests(unittest.TestCase):
+        def test_version_is_major_minor_patch(self):
+            # release tags and package names are built from it (buzz2vlc-v<version>)
+            self.assertRegex(__version__, r"^\d+\.\d+\.\d+$")
+
         def test_volume_clamp(self):
             for step, expected in [(400, 256), (-400, 0)]:
                 self.assertTrue(0 <= max(0, min(256, 128 + step)) <= 256)
@@ -2038,6 +2045,23 @@ def cmd_selftest() -> int:
     return 0 if result.wasSuccessful() else 1
 
 
+def version_report() -> str:
+    """--version: the version plus what this install can use (hidapi,
+    requests, the VLC it would launch, window control). Handy in bug
+    reports, and the installers run it to check a fresh install."""
+    cfg, _errors, _warnings = load_config()
+    vlc = find_vlc_path(cfg.get("vlc_path"))
+    _can_raise, window_control = window_control_available()
+    return "\n".join([
+        f"buzz2vlc {__version__}",
+        f"Python {platform.python_version()} on {platform.system()} {platform.machine()}",
+        f"hidapi: {'available' if hid is not None else 'missing (pip install hidapi)'}",
+        f"requests: {'available' if requests is not None else 'missing (pip install requests)'}",
+        f"VLC: {vlc or 'not found -- install VLC media player (https://www.videolan.org/vlc/)'}",
+        f"window control: {window_control}",
+    ])
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     """CLI entry point: parses args, dispatches to the matching cmd_*
     function, or (with no flags) loads the config and runs the listener
@@ -2053,12 +2077,17 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--diagnose-vlc", nargs=2, metavar=("PORT", "PASSWORD"),
                          help="with --diagnose, also probe a running VLC instance's volume ceiling")
     parser.add_argument("--diagnose-sound", metavar="PATH", help="with --diagnose-vlc, test-play a sound file")
+    parser.add_argument("--version", action="store_true",
+                         help="print the version and which optional parts (hidapi, VLC, window control) are available")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                          format="%(asctime)s %(levelname)s %(message)s")
 
+    if args.version:
+        print(version_report())
+        return 0
     if args.selftest:
         return cmd_selftest()
     if args.list:

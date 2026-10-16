@@ -42,17 +42,56 @@ built-in HTTP interface (`--extraintf http`). That HTTP interface *is*
 VLC's Lua endpoint, so this uses the same integration point Lua would,
 without needing to write any Lua.
 
-## Requirements
+## Install
+
+Download from the [latest release](https://github.com/Elie-Koivunen/buzz2vlc/releases/latest).
+Each release has an installer and a portable package for Windows and Linux:
+
+| | Windows 10/11 (64-bit) | Linux (x86_64) |
+|---|---|---|
+| **Installer**: checks the prerequisites and offers to install what's missing | `buzz2vlc-<version>-windows-x64-setup.exe` | `buzz2vlc-<version>-linux-x86_64-setup.sh` |
+| **Portable**: unpack and run, nothing is installed | `buzz2vlc-<version>-windows-x64-portable.zip` | `buzz2vlc-<version>-linux-x86_64-portable.tar.gz` |
+
+The packages contain everything buzz2vlc itself needs (no Python required). The one
+prerequisite is [VLC media player](https://www.videolan.org/vlc/), which buzz2vlc starts and
+controls. `SHA256SUMS.txt` in each release holds the files' checksums.
+
+**Windows installer.** Installs for your user, no administrator rights needed ("Install for all
+users" is offered too), with a Start menu entry, an optional desktop icon and an uninstaller
+(Settings -> Apps). If VLC media player is missing, it offers to download the official 64-bit
+VLC installer from videolan.org, accepts the file only if its SHA-256 checksum is the expected
+one, and starts it. The installer isn't code-signed, so Windows SmartScreen may ask first: *More
+info* -> *Run anyway*. Unattended: `buzz2vlc-<version>-windows-x64-setup.exe /VERYSILENT
+/INSTALLVLC=1` (the last switch also installs VLC when it's missing).
+
+**Linux installer.** Run it with `bash buzz2vlc-<version>-linux-x86_64-setup.sh`. It installs
+into `~/.local/opt/buzz2vlc`, puts the `buzz2vlc` and `buzz2vlc-cli` commands in `~/.local/bin`
+and adds a menu entry (run as root: `/opt/buzz2vlc` and `/usr/local/bin`). It checks for VLC,
+for `wmctrl` (window focus, identify and tiling) and for access to the Buzz receiver (a udev
+rule), and offers to install what's missing with apt, dnf, zypper or pacman, asking for sudo.
+`--help` lists the options: `--yes` (unattended), `--no-prerequisites`, `--prerequisites-only`,
+`--prefix`, `--bindir` and `--uninstall`. Each release is tested on Debian 12, Ubuntu 22.04 and
+24.04, Fedora, openSUSE Tumbleweed and Arch Linux.
+
+**Portable.** Unpack anywhere and run `buzz2vlc.exe` (Windows) or `./buzz2vlc` (Linux);
+`buzz2vlc-cli` is the command line. Install VLC yourself. On Linux, receiver access for your
+user may need the udev rule: `sudo bash buzz2vlc-<version>-linux-x86_64-setup.sh
+--prerequisites-only` adds it (and VLC and wmctrl) without installing buzz2vlc.
+
+All of them, and the source version, keep your settings in `~/.buzz2vlc.json`; uninstalling
+leaves that file alone. `buzz2vlc-cli --version` shows what an installation can use (hidapi,
+the VLC it found, window control).
+
+**From source** (Python 3.10 or newer):
 
 ```bash
 git clone https://github.com/Elie-Koivunen/buzz2vlc.git   # or Code -> Download ZIP on GitHub
 pip install hidapi requests
 ```
 
-No VLC driver installs are required: Windows 10/11 handles the Buzz
-receiver with its built-in `HidUsb` driver, and Linux uses the kernel's
-generic HID subsystem. See **Windows setup** below for the one common
-snag.
+No device drivers are needed: Windows 10/11 handles the Buzz receiver with its built-in `HidUsb`
+driver, and Linux uses the kernel's generic HID subsystem. See **Windows setup** below for the
+one common snag.
 
 ## Files
 
@@ -65,10 +104,13 @@ Two Python files, plus a double-click launcher:
 | `Launch_buzz2vlc.bat` | Double-click entry point: installs dependencies on first run, then opens the GUI with no console window. |
 | `CONTACT.txt` | GitHub link / developer email / license, shown in Help -> About. Plain text, edit directly. |
 | `LICENSE` | PolyForm Noncommercial License 1.0.0 (see **License** below). |
+| `CHANGELOG.md` | What changed in each version. |
+| `packaging/` | How the release packages are built: `build.py`, the PyInstaller spec, the Windows installer script (Inno Setup) and the Linux installer script. See [packaging/README.md](packaging/README.md). |
 
-The repository also has `.github/workflows/selftest.yml` (runs `--selftest` on Windows, Linux
-and macOS for every push) and a `.gitattributes` that keeps `Launch_buzz2vlc.bat` byte for
-byte, so its CRLF line endings survive any checkout (cmd.exe needs them).
+The repository also has two GitHub Actions workflows: `selftest.yml` runs `--selftest` on
+Windows, Linux and macOS for every push, and `release.yml` builds, tests and publishes the
+packages for each version tag. `.gitattributes` keeps `Launch_buzz2vlc.bat` byte for byte, so
+its CRLF line endings survive any checkout (cmd.exe needs them), and the shell scripts LF.
 
 The hardware diagnostic and window-focus code used to be separate files
 (`buzz2vlc_diagnose.py`, `buzz2vlc_window.py`), and the tap/hold state
@@ -80,7 +122,11 @@ a headless install (`buzz2vlc.py` alone) never needs to pull it in.
 
 ## Quick start
 
-Double-click **`Launch_buzz2vlc.bat`** to open the GUI directly (installs
+Installed or portable: start **buzz2vlc** from the Start menu / applications menu, or
+`buzz2vlc.exe` / `./buzz2vlc` in the portable folder. In a terminal, `buzz2vlc-cli` takes the
+same options as `python buzz2vlc.py` below (`buzz2vlc-cli --list`, `--diagnose`, ...).
+
+From source: double-click **`Launch_buzz2vlc.bat`** (Windows) to open the GUI directly (installs
 `hidapi`/`requests` on first run if missing, then launches silently via
 `pythonw` with no console window). Or from a terminal:
 
@@ -386,7 +432,8 @@ title bar shows the generic "VLC media player" as a result.
 ## Self-test
 
 ```bash
-python buzz2vlc.py --selftest
+python buzz2vlc.py --selftest       # from source
+buzz2vlc-cli --selftest             # installed or portable package
 ```
 
 Runs a battery of checks (volume clamping, malformed-report handling,

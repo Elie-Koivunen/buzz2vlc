@@ -1,0 +1,243 @@
+# buzz2vlc release: builds the Windows and Linux packages, tests each one, and on a
+# buzz2vlc-v<version> tag publishes them as a GitHub Release:
+#   buzz2vlc-<v>-windows-x64-setup.exe         installer: checks for VLC, offers to install it
+#   buzz2vlc-<v>-windows-x64-portable.zip      portable: unzip and run
+#   buzz2vlc-<v>-linux-x86_64-setup.sh         installer: checks VLC, wmctrl and device access,
+#                                              offers to install them (apt, dnf, zypper, pacman)
+#   buzz2vlc-<v>-linux-x86_64-portable.tar.gz  portable: unpack and run
+#   SHA256SUMS.txt
+# "Run workflow" builds and tests without publishing; the packages are then kept as
+# workflow artifacts for 14 days. A failing step posts the end of its output as an
+# annotation (readable without signing in, unlike the job log).
+name: release
+
+on:
+  push:
+    tags: ["buzz2vlc-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  # The VLC the Windows installer offers to download; it accepts only this SHA-256.
+  VLC_VERSION: "3.0.24"
+  VLC_SHA256: "d711e1e1fe52052748c39080c7dce63f6b7e4c315efedf1774a3f1957b782ff3"
+
+jobs:
+  windows:
+    name: Windows packages
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Tag matches the program's version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: python -c "import buzz2vlc, os, sys; tag = os.environ['GITHUB_REF_NAME']; sys.exit(0 if tag == 'buzz2vlc-v' + buzz2vlc.__version__ else 'tag ' + tag + ' does not match version ' + buzz2vlc.__version__)"
+      - name: Build tools
+        run: python -m pip install -r packaging/requirements.txt
+      - name: Inno Setup 6
+        run: |
+          iscc="C:/Program Files (x86)/Inno Setup 6/ISCC.exe"
+          if [ ! -f "$iscc" ]; then choco install innosetup --no-progress -y; fi
+          test -f "$iscc"
+          echo "ISCC=$iscc" >> "$GITHUB_ENV"
+          echo "OUT=$(cygpath -m "$RUNNER_TEMP/out")" >> "$GITHUB_ENV"
+          echo "WORK=$(cygpath -m "$RUNNER_TEMP/work")" >> "$GITHUB_ENV"
+      - name: Build (each package is checked as it is made)
+        run: |
+          set +e
+          python packaging/build.py --out "$OUT" --work "$WORK" --iscc "$ISCC" \
+            --vlc-version "$VLC_VERSION" --vlc-sha256 "$VLC_SHA256" 2>&1 | tee "$RUNNER_TEMP/build.log"
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            msg=$(tail -n 30 "$RUNNER_TEMP/build.log" | tr -d '\r' | awk '{gsub(/%/,"%25"); printf "%s%%0A", $0}')
+            echo "::error title=Windows build failed::$msg"
+          fi
+          exit "$rc"
+      - name: The portable program's window opens
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem "$env:OUT/*-portable.zip"
+          Expand-Archive $zip.FullName -DestinationPath "$env:RUNNER_TEMP/portable"
+          $exe = (Get-ChildItem "$env:RUNNER_TEMP/portable/*/buzz2vlc.exe").FullName
+          $p = Start-Process -PassThru $exe
+          Start-Sleep -Seconds 10
+          if ($p.HasExited) { Write-Output "::error title=Portable GUI::buzz2vlc.exe exited ($($p.ExitCode))"; exit 1 }
+          Stop-Process -Id $p.Id
+          Write-Output "buzz2vlc.exe was still running after 10 s"
+      - name: The installer installs buzz2vlc and VLC, and the uninstaller removes buzz2vlc
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem "$env:OUT/*-setup.exe").FullName
+          $dir = "$env:RUNNER_TEMP\installed"
+          $log = "$env:RUNNER_TEMP\setup.log"
+          $p = Start-Process -Wait -PassThru $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', "/DIR=$dir", "/LOG=$log", '/INSTALLVLC=1'
+          Select-String -Path $log -Pattern 'VLC'
+          if ($p.ExitCode -ne 0) { Write-Output "::error title=Installer::exit code $($p.ExitCode)"; exit 1 }
+          $report = & "$dir\buzz2vlc-cli.exe" --version
+          $report
+          if (-not ($report -match '^VLC: .*vlc\.exe$')) { Write-Output "::error title=Installer::VLC was not installed"; exit 1 }
+          $shortcut = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\buzz2vlc.lnk"
+          if (-not (Test-Path $shortcut)) { Write-Output "::error title=Installer::no Start menu shortcut"; exit 1 }
+          $g = Start-Process -PassThru "$dir\buzz2vlc.exe"
+          Start-Sleep -Seconds 10
+          if ($g.HasExited) { Write-Output "::error title=Installed GUI::buzz2vlc.exe exited ($($g.ExitCode))"; exit 1 }
+          Stop-Process -Id $g.Id
+          Start-Sleep -Seconds 2
+          Start-Process -Wait "$dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
+          for ($i = 0; $i -lt 60 -and (Test-Path "$dir\buzz2vlc.exe"); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path "$dir\buzz2vlc.exe") { Write-Output "::error title=Uninstaller::buzz2vlc.exe is still there"; exit 1 }
+          if (Test-Path $shortcut) { Write-Output "::error title=Uninstaller::the Start menu shortcut is still there"; exit 1 }
+          Write-Output "installed (with VLC), started, uninstalled"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: windows-packages
+          path: ${{ env.OUT }}/*
+          retention-days: 14
+          if-no-files-found: error
+
+  linux:
+    name: Linux packages
+    # The oldest supported runner: the packages then run on glibc 2.35 and newer.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Tag matches the program's version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: python -c "import buzz2vlc, os, sys; tag = os.environ['GITHUB_REF_NAME']; sys.exit(0 if tag == 'buzz2vlc-v' + buzz2vlc.__version__ else 'tag ' + tag + ' does not match version ' + buzz2vlc.__version__)"
+      - name: Build tools, and a virtual display for the window test
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb desktop-file-utils
+          python -m pip install -r packaging/requirements.txt
+          echo "OUT=$RUNNER_TEMP/out" >> "$GITHUB_ENV"
+      - name: Build (each package is checked as it is made, the installer by a trial install)
+        run: |
+          set +e
+          python packaging/build.py --out "$OUT" --work "$RUNNER_TEMP/work" 2>&1 | tee "$RUNNER_TEMP/build.log"
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            msg=$(tail -n 30 "$RUNNER_TEMP/build.log" | awk '{gsub(/%/,"%25"); printf "%s%%0A", $0}')
+            echo "::error title=Linux build failed::$msg"
+          fi
+          exit "$rc"
+      - name: The portable program's window opens
+        run: |
+          mkdir "$RUNNER_TEMP/portable"
+          tar -xzf "$OUT"/*-portable.tar.gz -C "$RUNNER_TEMP/portable"
+          set +e
+          xvfb-run -a timeout 10 "$RUNNER_TEMP"/portable/*/buzz2vlc
+          rc=$?
+          if [ "$rc" -ne 124 ]; then echo "::error title=Portable GUI::buzz2vlc exited ($rc) instead of running"; exit 1; fi
+          echo "buzz2vlc was still running after 10 s"
+      - name: The installer installs buzz2vlc with its prerequisites, and uninstalls it
+        run: |
+          set -e
+          setup=$(ls "$OUT"/*-setup.sh)
+          bash "$setup" --yes
+          ~/.local/bin/buzz2vlc-cli --version | tee "$RUNNER_TEMP/version.txt"
+          grep -q '^VLC: /usr/bin/vlc' "$RUNNER_TEMP/version.txt" || { echo "::error title=Installer::VLC was not installed"; exit 1; }
+          grep -q '^window control: wmctrl' "$RUNNER_TEMP/version.txt" || { echo "::error title=Installer::wmctrl was not installed"; exit 1; }
+          test -f /etc/udev/rules.d/70-buzz2vlc.rules || { echo "::error title=Installer::no udev rule"; exit 1; }
+          desktop-file-validate ~/.local/share/applications/buzz2vlc.desktop
+          set +e
+          xvfb-run -a timeout 10 ~/.local/bin/buzz2vlc
+          rc=$?
+          set -e
+          if [ "$rc" -ne 124 ]; then echo "::error title=Installed GUI::buzz2vlc exited ($rc) instead of running"; exit 1; fi
+          bash "$setup" --yes --no-prerequisites > /dev/null   # a second run replaces the installation
+          bash "$setup" --uninstall --yes
+          test ! -e ~/.local/opt/buzz2vlc && test ! -e ~/.local/bin/buzz2vlc
+          echo "installed (with VLC, wmctrl, udev rule), started, replaced, uninstalled"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: linux-packages
+          path: ${{ env.OUT }}/*
+          retention-days: 14
+          if-no-files-found: error
+
+  linux-distros:
+    name: Linux installer on ${{ matrix.image }}
+    needs: linux
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["debian:12", "ubuntu:24.04", "fedora:latest", "opensuse/tumbleweed", "archlinux:latest"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          name: linux-packages
+          path: pkg
+      - name: Install, check and uninstall in a fresh ${{ matrix.image }} container
+        run: |
+          setup=$(basename pkg/*-setup.sh)
+          set +e
+          docker run --rm -v "$PWD/pkg:/pkg:ro" -v "$PWD/packaging/linux:/test:ro" "${{ matrix.image }}" \
+            sh /test/distro-test.sh "/pkg/$setup" 2>&1 | tee "$RUNNER_TEMP/test.log"
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            msg=$(tail -n 30 "$RUNNER_TEMP/test.log" | awk '{gsub(/%/,"%25"); printf "%s%%0A", $0}')
+            echo "::error title=Installer on ${{ matrix.image }}::$msg"
+          fi
+          exit "$rc"
+
+  release:
+    name: GitHub Release
+    if: startsWith(github.ref, 'refs/tags/buzz2vlc-v')
+    needs: [windows, linux, linux-distros]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: "*-packages"
+          merge-multiple: true
+          path: dist
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -e
+          v="${TAG#buzz2vlc-v}"
+          ls -l dist
+          for f in "buzz2vlc-$v-windows-x64-setup.exe" "buzz2vlc-$v-windows-x64-portable.zip" \
+                   "buzz2vlc-$v-linux-x86_64-setup.sh" "buzz2vlc-$v-linux-x86_64-portable.tar.gz"; do
+            test -f "dist/$f" || { echo "::error title=Package missing::$f"; exit 1; }
+          done
+          (cd dist && sha256sum buzz2vlc-* > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          python3 - "$v" > notes.md <<'PY'
+          import re, sys
+          v = sys.argv[1]
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          m = re.search(rf"^## {re.escape(v)}\b.*?$(.*?)(?=^## |\Z)", text, re.M | re.S)
+          print(m.group(1).strip() if m else f"buzz2vlc {v}")
+          print(f"""
+          ### Which file?
+
+          | | Windows 10/11 (64-bit) | Linux (x86_64) |
+          |---|---|---|
+          | **Installer**: checks for VLC media player and offers to install it | `buzz2vlc-{v}-windows-x64-setup.exe` | `buzz2vlc-{v}-linux-x86_64-setup.sh` |
+          | **Portable**: unpack and run, nothing is installed | `buzz2vlc-{v}-windows-x64-portable.zip` | `buzz2vlc-{v}-linux-x86_64-portable.tar.gz` |
+
+          Both need [VLC media player](https://www.videolan.org/vlc/). On Linux run the installer with
+          `bash buzz2vlc-{v}-linux-x86_64-setup.sh` (`--help` lists its options). `SHA256SUMS.txt` holds
+          the files' checksums. See the [README](https://github.com/Elie-Koivunen/buzz2vlc#install) for details.""")
+          PY
+          cat notes.md
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --latest \
+            --title "buzz2vlc $v" --notes-file notes.md dist/*
