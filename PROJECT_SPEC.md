@@ -110,10 +110,14 @@ portable tar.gz. The design decisions:
   (`VLC_VERSION` / `VLC_SHA256` in `release.yml`, checked against the
   published checksum at build time), and installs it with msiexec through
   ShellExec, which can ask for administrator rights (silent: `/qn` with
-  "runas"). Not VLC's .exe installer: started silently on a clean Windows
-  machine it never finished (CI, 2026-10-16), while msiexec /qn is made
-  for unattended installs. Linux installs the distribution's package
-  (apt, dnf, zypper, pacman).
+  "runas"); Windows Installer has a standard silent mode and a log.
+  **Inno Setup calls NextButtonClick in silent installs too** (it
+  simulates the clicks): the interactive VLC branch there must check
+  `WizardSilent`, or a silent install opens VLC's install wizard and
+  waits forever for a click (found by the CI install test, 2026-10-16).
+  Silent installs install VLC only with `/INSTALLVLC=1`, in
+  PrepareToInstall. Linux installs the distribution's package (apt, dnf,
+  zypper, pacman).
 - **Per-user installs by default.** Windows: `PrivilegesRequired=lowest`
   with "all users" offered; a fixed AppId makes a new version replace the
   old in place, and `[InstallDelete]` clears the old `_internal`. Linux:

@@ -4,8 +4,7 @@
 ;
 ; Checks for VLC media player. When it is missing, a wizard page offers to download VLC's
 ; official 64-bit Windows Installer package (MSI) from videolan.org, accepted only with the
-; expected SHA-256, and install it with msiexec. (Not VLC's .exe installer: in a silent
-; install it never finished on a clean Windows machine; msiexec /qn is made for that.)
+; expected SHA-256, and install it with msiexec (a standard silent mode, /qn, and a log).
 ; Installs for the current user by default (no administrator rights needed);
 ; "Install for all users" is offered on the first page.
 ;
@@ -164,10 +163,13 @@ begin
   Result := (PageID = VlcPage.ID) and (VlcExe() <> '');
 end;
 
+{ Interactive installs only: Inno Setup calls NextButtonClick in silent installs too
+  (it simulates the clicks), where VLC's install wizard would wait for a user who isn't
+  there. Silent installs go through PrepareToInstall below instead. }
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
-  if (CurPageID = wpReady) and (VlcExe() = '') and (VlcPage.SelectedValueIndex = 0) then
+  if (CurPageID = wpReady) and not WizardSilent and (VlcExe() = '') and (VlcPage.SelectedValueIndex = 0) then
   begin
     DownloadPage.Clear;
     DownloadPage.Add('{#VlcUrl}', 'vlc-setup.msi', '{#VlcSha256}');

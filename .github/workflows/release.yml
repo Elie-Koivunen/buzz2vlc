@@ -92,7 +92,16 @@ jobs:
             exit 1
           }
           # Setup.exe waits for its own installer process and returns its exit code; the time
-          # limit turns a hang (e.g. a dialog nobody can see) into a failure with diagnostics.
+          # limits turn a hang (e.g. a dialog nobody can see) into a failure with diagnostics.
+          # 1. Silent, without /INSTALLVLC: installs buzz2vlc only and must not touch VLC.
+          $p = Start-Process -PassThru $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', "/DIR=$dir", "/LOG=$log"
+          if (-not $p.WaitForExit(300000)) { Fail 'Installer' 'a silent install without /INSTALLVLC still runs after 5 minutes' }
+          if ($p.ExitCode -ne 0) { Fail 'Installer' "exit code $($p.ExitCode)" }
+          if (-not (Select-String -Path $log -Pattern '/INSTALLVLC=1 installs it' -Quiet)) { Fail 'Installer' 'no note about the missing VLC in the setup log' }
+          $before = & "$dir\buzz2vlc-cli.exe" --version
+          if (-not ($before -match '^VLC: not found')) { Fail 'Installer' "VLC was found before it was installed: $before" }
+          Write-Output "silent install without /INSTALLVLC: buzz2vlc installed, VLC left alone"
+          # 2. Silent again, with /INSTALLVLC=1: replaces the installation and installs VLC.
           $p = Start-Process -PassThru $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', "/DIR=$dir", "/LOG=$log", '/INSTALLVLC=1'
           if (-not $p.WaitForExit(900000)) { Fail 'Installer' 'still running after 15 minutes' }
           Select-String -Path $log -Pattern 'VLC|msiexec'
